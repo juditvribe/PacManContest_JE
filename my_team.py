@@ -25,7 +25,6 @@ import util
 
 from capture_agents import CaptureAgent
 from game import Directions
-from game import Actions
 from util import nearest_point
 
 
@@ -73,10 +72,31 @@ class ReflexCaptureAgent(CaptureAgent):
         """
         Picks among the actions with the highest Q(s,a).
         """
-        
-        opponents = [game_state.get_agent_state(i).get_position() for i in self.get_opponents(game_state)]
-        best_action = self.minimax(game_state, 0, 2, self.index, opponents)
-        return best_action
+        actions = game_state.get_legal_actions(self.index)
+
+        # You can profile your evaluation time by uncommenting these lines
+        # start = time.time()
+        values = [self.evaluate(game_state, a) for a in actions]
+        # print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
+
+        max_value = max(values)
+        best_actions = [a for a, v in zip(actions, values) if v == max_value]
+
+        food_left = len(self.get_food(game_state).as_list())
+
+        if food_left <= 2:
+            best_dist = 9999
+            best_action = None
+            for action in actions:
+                successor = self.get_successor(game_state, action)
+                pos2 = successor.get_agent_position(self.index)
+                dist = self.get_maze_distance(self.start, pos2)
+                if dist < best_dist:
+                    best_action = action
+                    best_dist = dist
+            return best_action
+
+        return random.choice(best_actions)
 
     def get_successor(self, game_state, action):
         """
@@ -121,173 +141,52 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
   we give you to get an idea of what an offensive agent might look like,
   but it is by no means the best or only way to build an offensive agent.
   """
-    def get_new_position(self, current_pos, action):
-        if current_pos is None:
-            raise ValueError("Current position is None. Check agent initialization.")
-        dx, dy = Actions.direction_to_vector(action)
-        next_x, next_y = [int(current_pos[0] + dx), int(current_pos[1] + dy)]
-        return (next_x, next_y)
-    
-    
-    def get_ghost_actions(self, current_pos, game_state):
-        walls = game_state.get_walls()
 
-        actions = []
-        for direction in [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]:
-            next_x, next_y = self.get_new_position(current_pos, direction)
-            if not walls[next_x][next_y]:
-                if (0 <= next_x < walls.width) and (0 <= next_y < walls.height):
-                    actions.append(direction)
-        return actions
-            
-    
-    # def expectation(self, game_state, position, legal_actions):
-    #     ghost_dict = {}
-    #     for action in legal_actions:
-    #         successor = self.get_successor(game_state, action)
-    #         new_pos = successor.get_agent_position(self.index)
-    #         ghost_dict[action] = self.get_maze_distance(position, new_pos) * self.get_ghost_weights()['distance']
-
-    #     min_action = min(ghost_dict)
-
-    #     for action in ghost_dict:
-    #         if ghost_dict[action] == min_action:
-    #             ghost_dict[action] = 0.8
-    #         else:
-    #             ghost_dict[action] = 0.2/(len(legal_actions)-1)
-    #     return ghost_dict
-    
-    
-    # def ghost_eval(self, game_state, opponents, opponent):
-    #     new_pos = opponents[opponent]
-    #     enemy = game_state.get_agent_state(opponent)
-    #     my_pos = game_state.get_agent_state(self.index).get_position()
-
-    #     if enemy.scared_timer > 0:
-    #         distance = -self.get_maze_distance(my_pos, new_pos) * self.get_ghost_weights()['distance']
-    #     else:
-    #         distance = self.get_maze_distance(my_pos, new_pos) * self.get_ghost_weights()['distance']
-    #     return distance
-           
-           
-    def minimax(self, game_state, depth, max_depth, agent, opponents, alpha=-float('inf'), beta=float('inf')):
-        def maxAgent(game_state, depth, max_depth, alpha, beta, opponents):
-            # We set the terminal condition to game end or depth limit
-            if depth == max_depth:
-                return [self.evaluate(game_state, None)]
-            
-            current_alpha = alpha
-            max_ = float("-inf")
-            best_action = None 
-            legal_actions = [action for action in game_state.get_legal_actions(self.index) if action != Directions.STOP] # Get legal moves per agent
-
-            # We loop through legal actions for Pacman
-            for action in legal_actions:
-                next_state = game_state.generate_successor(self.index, action)
-                evaluation_max = minAgent(next_state, 0, depth, max_depth, alpha, beta, opponents)[0] #[0] used to access the score, minimax function returns a tuple (score, action)
-                # We update maximum score and best action if the evaluated score is higher than the current maximum
-                if evaluation_max > max_:
-                    max_ = evaluation_max
-                    best_action = action
-                if max_ > beta:
-                    return max_, best_action
-                current_alpha = max(current_alpha, max_)
-            return max_, best_action
-
-        # Function for minimizing agent (Ghost)
-        def minAgent(game_state, agent_idx, depth, max_depth, alpha, beta, opponents):
-            
-            min_ = float("+inf")
-            best_action = None 
-            
-            if opponents[agent_idx] is not None:
-                current_beta = beta
-                legal_actions = [action for action in self.get_ghost_actions(opponents[agent_idx], game_state) if action != Directions.STOP] # Get legal moves per agent            # We loop through legal actions for the current ghost
-                
-                for action in legal_actions:
-                    # We get the successor state after taking an action
-                    next_state = game_state.generate_successor(opponents[agent_idx], action)
-                    if agent_idx == len(opponents) - 1: # If we are in the last ghost
-                        # Then, we move to the maximizing agent
-                        evaluation_min = maxAgent(next_state, depth+1, max_depth, alpha, beta, opponents)[0] #[0] used to access the score, minimax function returns a tuple (score, action)
-                    else: # Otherwise, continue with the next ghost
-                        evaluation_min = minAgent(next_state, agent_idx+1, depth, max_depth, alpha, beta, opponents)[0]
-                    # We update minimum score and best action if the evaluated score is lesser than the current minimum
-                    if evaluation_min < min_:
-                        min_ = evaluation_min
-                        best_action = action
-                    if min_ < alpha:
-                        return min_, best_action
-                    current_beta = min(current_beta, min_)    
-            
-            if min_ == float("+inf"):
-                min_ = 0
-            return min_, best_action
-
-        score, action = maxAgent(game_state, depth, max_depth, alpha, beta, opponents) 
-        return action
-
-     
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        food_list = self.get_food(successor).as_list()
-        features['successor_score'] = -len(food_list)  
-        
         my_pos = successor.get_agent_state(self.index).get_position()
         
-        #Enemies, ghosts and invaders
-        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() != None]
-        invaders = [a for a in enemies if a.is_pacman and a.get_position() != None]
-        features['invader_distance'] = 0.0
-        
-        #different distances to each type of enemy agents
-        if len(invaders) > 0:
-            features['invader_distance'] = min([self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders]) +1
-        
-        if len(ghosts) > 0:
-            ghost_eval = 0.0
-            scared_distance = 0.0
-            reg_ghosts = [ghost for ghost in ghosts if ghost.scared_timer == 0]
-            scared_ghost = [ghost for ghost in ghosts if ghost.scared_timer > 0]
-            if len(reg_ghosts) > 0:
-                ghost_eval = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in reg_ghosts])
-                if ghost_eval <= 1:
-                    ghost_eval = -float("inf")
-            
-            if len(scared_ghost) > 0:
-                scared_distance = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in scared_ghost])
-            if scared_distance < ghost_eval or ghost_eval == 0:
-                if scared_distance == 0:
-                    features['ghost_scared'] = -10
-            features['distance_to_ghost'] = ghost_eval
-
-        # Compute distance to the nearest food
-        
-        if len(food_list) > 0:  # This should always be True,  but better safe than sorry
-            my_pos = successor.get_agent_state(self.index).get_position()
-            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-            features['distance_to_food'] = min_distance
+        # Food proximity
+        food_list = self.get_food(successor).as_list()
+        if len(food_list) > 0:
+            features['distance_to_food'] = min([self.get_maze_distance(my_pos, food) for food in food_list])
             features['food_remaining'] = len(food_list)
         
+        # Enemy ghosts (danger proximity)
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() is not None]
+        if len(ghosts) > 0:
+            features['distance_to_ghost'] = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in ghosts])
         
-        #Avoid stopping or bugging
-        if action == Directions.STOP: 
+        # Scared ghosts
+        scared_ghosts = [a for a in ghosts if a.scared_timer > 0]
+        if len(scared_ghosts) > 0:
+            features['distance_to_scared_ghost'] = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in scared_ghosts])
+        
+        # Carrying food
+        carried_food = successor.get_agent_state(self.index).num_carrying
+        features['carrying_food'] = carried_food
+        
+        # Power capsules
+        capsules = self.get_capsules(successor)
+        if len(capsules) > 0:
+            features['distance_to_capsule'] = min([self.get_maze_distance(my_pos, capsule) for capsule in capsules])
+        
+        # Stopping and reversing penalties
+        if action == Directions.STOP:
             features['stop'] = 1
-        if game_state.get_agent_state(self.index).configuration.direction is not None:
-            rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-            if action == rev:
-                features['reverse'] = 1
-  
+        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
+        if action == rev:
+            features['reverse'] = 1
+
         return features
 
-    def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'invader_distance': -50, 'distance_to_food': -1, 'food_remaining': -1, 'distance_to_ghost': 2, 'ghost_scared': -1, 'stop': -100, 'reverse': -20 }
 
-    
-    def get_ghost_weights(self):
-        return {'distance': 1}
+    def get_weights(self, game_state, action):
+        return {'food_remaining': -1, 'distance_to_food': -1, 'distance_to_ghost': 10, 'distance_to_scared_ghost': -10,
+                'carrying_food': 10, 'distance_to_capsule': -5, 'stop': -100, 'reverse': -10}
+
 
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
@@ -297,153 +196,32 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
     could be like.  It is not the best or only way to make
     such an agent.
     """
-    def get_new_position(self, current_pos, action):
-        if current_pos is None:
-            raise ValueError("Current position is None. Check agent initialization.")
-        dx, dy = Actions.direction_to_vector(action)
-        next_x, next_y = int(current_pos[0] + dx), int(current_pos[1] + dy)
-        return (next_x, next_y)
-    
-    def get_ghost_actions(self, current_pos, game_state):
-        walls = game_state.get_walls()
 
-        actions = []
-        for direction in [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]:
-            next_x, next_y = self.get_new_position(current_pos, direction)
-            if not walls[next_x][next_y]:
-                if (0 <= next_x < walls.width) and (0 <= next_y < walls.height):
-                    actions.append(direction)
-        return actions
-    
-    def expectation(self, game_state, position, legal_actions):
-        ghost_dict = {}
-        for action in legal_actions:
-            successor = self.get_successor(game_state, action)
-            new_pos = successor.get_agent_position(self.index)
-            ghost_dict[action] = self.get_maze_distance(position, new_pos) * self.get_ghost_weights()['distance']
-
-        min_action = min(ghost_dict)
-
-        for action in ghost_dict:
-            if ghost_dict[action] == min_action:
-                ghost_dict[action] = 0.8
-            else:
-                ghost_dict[action] = 0.2/(len(legal_actions)-1)
-        return ghost_dict
-    
-    def ghost_eval(self, game_state, opponents, opponent):
-        new_pos = opponents[opponent]
-        enemy = game_state.get_agent_state(opponent)
-        my_pos = game_state.get_agent_state(self.index).get_position()
-
-        if enemy.scared_timer > 0:
-            distance = -self.get_maze_distance(my_pos, new_pos) * self.get_ghost_weights()['distance']
-        else:
-            distance = self.get_maze_distance(my_pos, new_pos) * self.get_ghost_weights()['distance']
-        return distance
-    
-    def minimax(self, game_state, depth, max_depth, agent, opponents, alpha=-float('inf'), beta=float('inf')):
-        def maxAgent(game_state, depth, max_depth, alpha, beta, opponents):
-            # We set the terminal condition to game end or depth limit
-            if depth == max_depth:
-                return [self.evaluate(game_state, None)]
-            
-            current_alpha = alpha
-            max_ = float("-inf")
-            best_action = None 
-            legal_actions = [action for action in game_state.get_legal_actions(self.index) if action != Directions.STOP] # Get legal moves per agent
-
-            # We loop through legal actions for Pacman
-            for action in legal_actions:
-                next_state = game_state.generate_successor(self.index, action)
-                evaluation_max = minAgent(next_state, 0, depth, max_depth, alpha, beta, opponents)[0] #[0] used to access the score, minimax function returns a tuple (score, action)
-                # We update maximum score and best action if the evaluated score is higher than the current maximum
-                if evaluation_max > max_:
-                    max_ = evaluation_max
-                    best_action = action
-                if max_ > beta:
-                    return max_, best_action
-                current_alpha = max(current_alpha, max_)
-            return max_, best_action
-
-        def minAgent(game_state, agent_idx, depth, max_depth, alpha, beta, opponents):
-            
-            min_ = float("+inf")
-            best_action = None 
-            
-            if opponents[agent_idx] is not None:
-                current_beta = beta
-                legal_actions = [action for action in self.get_ghost_actions(opponents[agent_idx], game_state) if action != Directions.STOP] # Get legal moves per agent            # We loop through legal actions for the current ghost
-                
-                for action in legal_actions:
-                    # We get the successor state after taking an action
-                    next_state = game_state.generate_successor(opponents[agent_idx], action)
-                    if agent_idx == len(opponents) - 1: # If we are in the last ghost
-                        # Then, we move to the maximizing agent
-                        evaluation_min = maxAgent(next_state, depth+1, max_depth, alpha, beta, opponents)[0] #[0] used to access the score, minimax function returns a tuple (score, action)
-                    else: # Otherwise, continue with the next ghost
-                        evaluation_min = minAgent(next_state, agent_idx+1, depth, max_depth, alpha, beta, opponents)[0]
-                    # We update minimum score and best action if the evaluated score is lesser than the current minimum
-                    if evaluation_min < min_:
-                        min_ = evaluation_min
-                        best_action = action
-                    if min_ < alpha:
-                        return min_, best_action
-                    current_beta = min(current_beta, min_)    
-            
-            if min_ == float("+inf"):
-                min_ = 0
-            return min_, best_action
-
-        score, action = maxAgent(game_state, depth, max_depth, alpha, beta, opponents) 
-        return action
-
-        
-    
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        food_list = self.get_food(successor).as_list()
-        features['successor_score'] = -len(food_list)  
-        
         my_pos = successor.get_agent_state(self.index).get_position()
-        
-        #Enemies, ghosts and invaders
+
+        # Invader proximity
         enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() != None]
-        invaders = [a for a in enemies if a.is_pacman and a.get_position() != None]
-        features['invader_distance'] = 0.0
-        
-        #different distances to each type of enemy agents
+        invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
+        features['num_invaders'] = len(invaders)
+        features['invader_distance'] = 0
         if len(invaders) > 0:
-            features['invader_distance'] = min([self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders]) +1
-        
-        if len(ghosts) > 0:
-            ghost_eval = 0.0
-            scared_distance = 0.0
-            reg_ghosts = [ghost for ghost in ghosts if ghost.scared_timer == 0]
-            scared_ghost = [ghost for ghost in ghosts if ghost.scared_timer > 0]
-            if len(reg_ghosts) > 0:
-                ghost_eval = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in reg_ghosts])
-                if ghost_eval <= 1:
-                    ghost_eval = -float("inf")
-            
-            if len(scared_ghost) > 0:
-                scared_distance = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in scared_ghost])
-            if scared_distance < ghost_eval or ghost_eval == 0:
-                if scared_distance == 0:
-                    features['ghost_scared'] = -10
-            features['distance_to_ghost'] = ghost_eval
+            features['invader_distance'] = min([self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders])
+
+        # Scared status
+        if successor.get_agent_state(self.index).scared_timer > 0:
+            features['is_scared'] = 1
 
         # Compute distance to the nearest food
-        
-        if len(food_list) > 0:  # This should always be True,  but better safe than sorry
+        food_list = self.get_food(successor).as_list()
+        if len(food_list) > 0: 
             my_pos = successor.get_agent_state(self.index).get_position()
             min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
             features['distance_to_food'] = min_distance
             features['food_remaining'] = len(food_list)
-        
-        
+            
         #Avoid stopping or bugging
         if action == Directions.STOP: 
             features['stop'] = 1
@@ -454,10 +232,9 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
   
         return features
 
+        return features
+
 
     def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'invader_distance': -50, 'distance_to_food': -1, 'food_remaining': -1, 'distance_to_ghost': 2, 'ghost_scared': -1, 'stop': -100, 'reverse': -20 }
-
-    
-    def get_ghost_weights(self):
-        return {'distance': 1}
+        return {'num_invaders': -1000,'invader_distance': -10, 'distance_to_food': -1, 
+                'food_remaining': -1, 'is_scared': -50, 'stop': -100, 'reverse': -10}
