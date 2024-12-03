@@ -25,6 +25,7 @@ import util
 
 from capture_agents import CaptureAgent
 from game import Directions
+from game import Actions
 from util import nearest_point
 
 
@@ -97,6 +98,7 @@ class ReflexCaptureAgent(CaptureAgent):
             return best_action
 
         return random.choice(best_actions)
+    
 
     def get_successor(self, game_state, action):
         """
@@ -141,51 +143,71 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
   we give you to get an idea of what an offensive agent might look like,
   but it is by no means the best or only way to build an offensive agent.
   """
-
+   
+            
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        my_pos = successor.get_agent_state(self.index).get_position()
-        
-        # Food proximity
         food_list = self.get_food(successor).as_list()
+        features['successor_score'] = -len(food_list)  
+        
+        my_state = successor.get_agent_state(self.index)
+        my_position = my_state.get_position()
+        
+        # Types of enemies: ghosts and invaders
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() != None]
+        invaders = [a for a in enemies if a.is_pacman and a.get_position() != None]
+        
+        
+        # Distances to invaders (pacman agents)
+        features['distance_to_invader'] = 0.0
+        if len(invaders) > 0:
+            features['distance_to_invader'] = min([self.get_maze_distance(my_position, invader.get_position()) for invader in invaders]) + 1
+        
+        # Distances to ghosts
+        if len(ghosts) > 0:
+            ghost_value = 0.0
+            scared_distance = 0.0
+            regular_ghosts = [ghost for ghost in ghosts if ghost.scared_timer == 0]
+            scared_ghosts = [ghost for ghost in ghosts if ghost.scared_timer > 0]
+            if len(regular_ghosts) > 0:
+                ghost_value = min([self.get_maze_distance(my_position, ghost.get_position()) for ghost in regular_ghosts])
+                if ghost_value <= 1:
+                    ghost_value = -float("inf")
+            
+            if len(scared_ghosts) > 0:
+                scared_distance = min([self.get_maze_distance(my_position, ghost.get_position()) for ghost in scared_ghosts])
+            
+            if scared_distance < ghost_value or ghost_value == 0:
+                if scared_distance == 0:
+                    features['scared_ghost'] = -10
+            features['distance_to_ghost'] = ghost_value
+
+
+        # Distance to nearest food
         if len(food_list) > 0:
-            features['distance_to_food'] = min([self.get_maze_distance(my_pos, food) for food in food_list])
+            my_position = successor.get_agent_state(self.index).get_position()  
+            min_distance = min([self.get_maze_distance(my_position, food) for food in food_list])
+            features['distance_to_food'] = min_distance
             features['food_remaining'] = len(food_list)
         
-        # Enemy ghosts (danger proximity)
-        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() is not None]
-        if len(ghosts) > 0:
-            features['distance_to_ghost'] = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in ghosts])
         
-        # Scared ghosts
-        scared_ghosts = [a for a in ghosts if a.scared_timer > 0]
-        if len(scared_ghosts) > 0:
-            features['distance_to_scared_ghost'] = min([self.get_maze_distance(my_pos, ghost.get_position()) for ghost in scared_ghosts])
-        
-        # Carrying food
-        carried_food = successor.get_agent_state(self.index).num_carrying
-        features['carrying_food'] = carried_food
-        
-        # Power capsules
-        capsules = self.get_capsules(successor)
-        if len(capsules) > 0:
-            features['distance_to_capsule'] = min([self.get_maze_distance(my_pos, capsule) for capsule in capsules])
-        
-        # Stopping and reversing penalties
-        if action == Directions.STOP:
+        # Avoid stopping or bugging
+        if action == Directions.STOP: 
             features['stop'] = 1
-        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-        if action == rev:
-            features['reverse'] = 1
-
+        if game_state.get_agent_state(self.index).configuration.direction is not None:
+            rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
+            if action == rev:
+                features['reverse'] = 1
+              
         return features
 
 
+
     def get_weights(self, game_state, action):
-        return {'food_remaining': -1, 'distance_to_food': -1, 'distance_to_ghost': 10, 'distance_to_scared_ghost': -10,
-                'carrying_food': 10, 'distance_to_capsule': -5, 'stop': -100, 'reverse': -10}
+        return {'successor_score': 100, 'distance_to_invader': -50, 'distance_to_ghost': 2, 'scared_ghost': -1, 
+                'distance_to_food': -1, 'food_remaining': -1,  'stop': -100, 'reverse': -20 }
 
 
 
@@ -196,45 +218,67 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
     could be like.  It is not the best or only way to make
     such an agent.
     """
-
+    
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        my_pos = successor.get_agent_state(self.index).get_position()
-
-        # Invader proximity
-        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
-        features['num_invaders'] = len(invaders)
-        features['invader_distance'] = 0
-        if len(invaders) > 0:
-            features['invader_distance'] = min([self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders])
-
-        # Scared status
-        if successor.get_agent_state(self.index).scared_timer > 0:
-            features['is_scared'] = 1
-
-        # Compute distance to the nearest food
         food_list = self.get_food(successor).as_list()
-        if len(food_list) > 0: 
-            my_pos = successor.get_agent_state(self.index).get_position()
-            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
+        features['successor_score'] = -len(food_list)  
+        
+        my_state = successor.get_agent_state(self.index)
+        my_position = my_state.get_position()
+        
+        # Types of enemies: ghosts and invaders
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() != None]
+        invaders = [a for a in enemies if a.is_pacman and a.get_position() != None]
+        
+        
+        # Distances to invaders (pacman agents)
+        features['distance_to_invader'] = 0.0
+        if len(invaders) > 0:
+            features['distance_to_invader'] = min([self.get_maze_distance(my_position, invader.get_position()) for invader in invaders]) + 1
+        
+        # Distances to ghosts
+        if len(ghosts) > 0:
+            ghost_value = 0.0
+            scared_distance = 0.0
+            regular_ghosts = [ghost for ghost in ghosts if ghost.scared_timer == 0]
+            scared_ghosts = [ghost for ghost in ghosts if ghost.scared_timer > 0]
+            if len(regular_ghosts) > 0:
+                ghost_value = min([self.get_maze_distance(my_position, ghost.get_position()) for ghost in regular_ghosts])
+                if ghost_value <= 1:
+                    ghost_value = -float("inf")
+            
+            if len(scared_ghosts) > 0:
+                scared_distance = min([self.get_maze_distance(my_position, ghost.get_position()) for ghost in scared_ghosts])
+            
+            if scared_distance < ghost_value or ghost_value == 0:
+                if scared_distance == 0:
+                    features['scared_ghost'] = -10
+            features['distance_to_ghost'] = ghost_value
+
+
+        # Distance to nearest food
+        if len(food_list) > 0:
+            my_position = successor.get_agent_state(self.index).get_position()  
+            min_distance = min([self.get_maze_distance(my_position, food) for food in food_list])
             features['distance_to_food'] = min_distance
             features['food_remaining'] = len(food_list)
-            
-        #Avoid stopping or bugging
+        
+        
+        # Avoid stopping or bugging
         if action == Directions.STOP: 
             features['stop'] = 1
         if game_state.get_agent_state(self.index).configuration.direction is not None:
             rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
             if action == rev:
                 features['reverse'] = 1
-  
+              
         return features
 
-        return features
 
 
     def get_weights(self, game_state, action):
-        return {'num_invaders': -1000,'invader_distance': -10, 'distance_to_food': -1, 
-                'food_remaining': -1, 'is_scared': -50, 'stop': -100, 'reverse': -10}
+        return {'successor_score': 100, 'distance_to_invader': -50, 'distance_to_ghost': 2, 'scared_ghost': -1, 
+                'distance_to_food': -1, 'food_remaining': -1,  'stop': -100, 'reverse': -20 }
